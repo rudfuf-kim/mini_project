@@ -12,17 +12,13 @@ OPENAI_API_KEY=발급받은_오픈AI_키
 """
 
 import os
-import json
 import requests
 from dotenv import load_dotenv
-from openai import OpenAI
 
 load_dotenv()
 
 OWM_API_KEY = os.getenv("WEATHER_API_KEY")
 BASE_URL = "https://api.openweathermap.org/data/2.5"
-
-client = OpenAI()  # OPENAI_API_KEY 를 .env 에서 자동으로 읽음
 
 # ── 한글 도시명 → 영문 변환 매핑 ─────────────────────
 # 검색은 영문 + ",KR" 로 보내야 OpenWeatherMap 이 정확히 찾습니다.
@@ -188,47 +184,3 @@ TOOL_SCHEMA = {
         },
     },
 }
-
-
-# ── 모델 ↔ 도구 연결 (end-to-end 실행) ─────────────
-def ask(user_message: str) -> str:
-    """사용자 질문을 받아 필요시 get_weather를 호출하고 최종 답변을 반환."""
-    messages = [
-        {"role": "system", "content": "너는 국내 여행 날씨 도우미야. 날씨 질문에는 반드시 get_weather 도구를 사용해."},
-        {"role": "user", "content": user_message},
-    ]
-
-    # 1단계: 모델에게 질문
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        tools=[TOOL_SCHEMA],
-    )
-    msg = response.choices[0].message
-
-    # 2단계: 도구 호출이 없으면 그대로 답변
-    if not msg.tool_calls:
-        return msg.content
-
-    # 도구 호출 처리 (여러 개 올 수 있으므로 반복)
-    messages.append(msg)
-    for tool_call in msg.tool_calls:
-        if tool_call.function.name == "get_weather":
-            args = json.loads(tool_call.function.arguments)
-            weather_data = get_weather(args["city"], args.get("days", 3))
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": json.dumps(weather_data, ensure_ascii=False),
-            })
-
-    # 3단계: 도구 결과를 넣고 최종 답변 생성
-    final = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-    )
-    return final.choices[0].message.content
-
-
-if __name__ == "__main__":
-    print("AI 답변:", ask("전주 날씨 어때? 옷차림도 추천해줘"))
