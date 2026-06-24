@@ -144,7 +144,6 @@ if not st.session_state.messages:
             if st.button(text, key=f"card_{i}", use_container_width=True):
                 st.session_state["pending_input"] = text
 
-    cols2 = st.columns(len(EXAMPLE_PILLS))
     st.markdown(C.pill_section_divider(), unsafe_allow_html=True)
     st.markdown('<div class="pill-row">', unsafe_allow_html=True)
     cols2 = st.columns(len(EXAMPLE_PILLS))
