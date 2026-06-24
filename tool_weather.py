@@ -4,33 +4,63 @@ Tool 1 — 날씨 조회 (get_weather)
 엔드포인트: /data/2.5/weather (현재), /data/2.5/forecast (예보)
 비용      : 완전 무료 (카드 등록 불필요, 월 100만 건)
 발급처    : https://openweathermap.org/api
+
+.env 예시
+----------
+OPENWEATHER_API_KEY=발급받은_날씨_키
+OPENAI_API_KEY=발급받은_오픈AI_키
 """
 
 import os
+import json
 import requests
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 
-OWM_API_KEY = os.getenv("OPENWEATHER_API_KEY")
+OWM_API_KEY = os.getenv("WEATHER_API_KEY")
 BASE_URL = "https://api.openweathermap.org/data/2.5"
 
-# 한글 도시명 → 영문 변환 매핑
+client = OpenAI()  # OPENAI_API_KEY 를 .env 에서 자동으로 읽음
+
+# ── 한글 도시명 → 영문 변환 매핑 ─────────────────────
+# 검색은 영문 + ",KR" 로 보내야 OpenWeatherMap 이 정확히 찾습니다.
 CITY_MAP = {
+    # 특별시·광역시
     "서울": "Seoul", "부산": "Busan", "대구": "Daegu",
     "인천": "Incheon", "광주": "Gwangju", "대전": "Daejeon",
-    "울산": "Ulsan", "제주": "Jeju", "제주도": "Jeju",
-    "강릉": "Gangneung", "전주": "Jeonju", "청주": "Cheongju",
-    "수원": "Suwon", "춘천": "Chuncheon", "여수": "Yeosu",
-    "경주": "Gyeongju", "통영": "Tongyeong", "속초": "Sokcho",
-    "포항": "Pohang", "천안": "Cheonan", "평창": "Pyeongchang",
+    "울산": "Ulsan", "세종": "Sejong",
+    # 도청 소재지·주요 도시
+    "수원": "Suwon", "성남": "Seongnam", "용인": "Yongin",
+    "고양": "Goyang", "안양": "Anyang", "부천": "Bucheon",
+    "춘천": "Chuncheon", "원주": "Wonju", "강릉": "Gangneung",
+    "속초": "Sokcho", "청주": "Cheongju", "충주": "Chungju",
+    "천안": "Cheonan", "아산": "Asan", "전주": "Jeonju",
+    "군산": "Gunsan", "익산": "Iksan", "목포": "Mokpo",
+    "여수": "Yeosu", "순천": "Suncheon", "포항": "Pohang",
+    "경주": "Gyeongju", "구미": "Gumi", "안동": "Andong",
+    "창원": "Changwon", "진주": "Jinju", "통영": "Tongyeong",
+    "거제": "Geoje", "김해": "Gimhae", "양산": "Yangsan",
+    # 관광지·제주·평창 등
+    "제주": "Jeju", "제주도": "Jeju", "서귀포": "Seogwipo",
+    "평창": "Pyeongchang", "가평": "Gapyeong", "남원": "Namwon",
+    "보령": "Boryeong", "태안": "Taean", "단양": "Danyang",
 }
 
 WEATHER_EMOJI = {
     "Clear": "☀️", "Clouds": "⛅", "Rain": "🌧️",
     "Snow": "❄️", "Thunderstorm": "⛈️", "Drizzle": "🌦️",
-    "Mist": "🌫️", "Fog": "🌁",
+    "Mist": "🌫️", "Fog": "🌁", "Haze": "🌫️",
 }
+
+
+def _to_english_city(city: str) -> str:
+    """한글 도시명을 영문으로 변환. 매핑에 없으면 입력값을 그대로 사용."""
+    key = city.strip().replace("특별시", "").replace("광역시", "") \
+              .replace("시", "").replace("도", "")
+    # 원본 → 정리한 키 순으로 매핑 조회, 둘 다 없으면 입력 그대로(영문 입력 대비)
+    return CITY_MAP.get(city.strip()) or CITY_MAP.get(key) or city.strip()
 
 
 def get_weather(city: str, days: int = 3) -> dict:
@@ -49,8 +79,7 @@ def get_weather(city: str, days: int = 3) -> dict:
     if not OWM_API_KEY:
         return {"error": "OPENWEATHER_API_KEY가 .env에 설정되지 않았습니다."}
 
-    # 한글 → 영문 변환
-    en_city = CITY_MAP.get(city, city)
+    en_city = _to_english_city(city)
 
     # ── 현재 날씨 ──────────────────────────────────
     try:
@@ -60,9 +89,11 @@ def get_weather(city: str, days: int = 3) -> dict:
                     "units": "metric", "lang": "kr"},
             timeout=10,
         )
+        if current_resp.status_code == 401:
+            return {"error": "API 키가 거부되었습니다(401). 키 값/활성화 상태를 확인하세요."}
         if current_resp.status_code == 404:
             return {
-                "error": f"'{city}' 도시 정보를 찾을 수 없습니다.",
+                "error": f"'{city}'({en_city}) 도시 정보를 찾을 수 없습니다.",
                 "available_cities": list(CITY_MAP.keys()),
             }
         current_resp.raise_for_status()
@@ -146,7 +177,7 @@ TOOL_SCHEMA = {
             "properties": {
                 "city": {
                     "type": "string",
-                    "description": "여행 목적지 도시명 (예: 제주, 부산, 강릉)",
+                    "description": "여행 목적지 도시명 (예: 제주, 부산, 강릉). 한글로 받아도 됩니다.",
                 },
                 "days": {
                     "type": "integer",
@@ -157,3 +188,47 @@ TOOL_SCHEMA = {
         },
     },
 }
+
+
+# ── 모델 ↔ 도구 연결 (end-to-end 실행) ─────────────
+def ask(user_message: str) -> str:
+    """사용자 질문을 받아 필요시 get_weather를 호출하고 최종 답변을 반환."""
+    messages = [
+        {"role": "system", "content": "너는 국내 여행 날씨 도우미야. 날씨 질문에는 반드시 get_weather 도구를 사용해."},
+        {"role": "user", "content": user_message},
+    ]
+
+    # 1단계: 모델에게 질문
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+        tools=[TOOL_SCHEMA],
+    )
+    msg = response.choices[0].message
+
+    # 2단계: 도구 호출이 없으면 그대로 답변
+    if not msg.tool_calls:
+        return msg.content
+
+    # 도구 호출 처리 (여러 개 올 수 있으므로 반복)
+    messages.append(msg)
+    for tool_call in msg.tool_calls:
+        if tool_call.function.name == "get_weather":
+            args = json.loads(tool_call.function.arguments)
+            weather_data = get_weather(args["city"], args.get("days", 3))
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": json.dumps(weather_data, ensure_ascii=False),
+            })
+
+    # 3단계: 도구 결과를 넣고 최종 답변 생성
+    final = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+    )
+    return final.choices[0].message.content
+
+
+if __name__ == "__main__":
+    print("AI 답변:", ask("전주 날씨 어때? 옷차림도 추천해줘"))
