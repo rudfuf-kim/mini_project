@@ -882,20 +882,49 @@ def search_attractions(
 
 
 # =========================
-# 7. 로컬 테스트
+# 8. OpenAI Function Calling 스키마
 # =========================
 
-if __name__ == "__main__":
-    # 전체 관광지 추천 테스트
-    sample = recommend_travel_place(
-        destination="과천",
-        travel_date="2026-07-20",
-        gender="여성",
-        age=25,
-        travel_style="이색/체험",
-        limit=3,
-    )
-    print(json.dumps(sample, ensure_ascii=False, indent=2))
+TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "search_attractions",
+        "description": (
+            "여행지의 관광지·명소를 개인화된 조건(나이, 여행 스타일, 카테고리 등)으로 "
+            "검색하고 추천합니다. 운영시간, 입장료, 블로그 후기, 지도 링크를 함께 제공합니다."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "destination": {
+                    "type": "string",
+                    "description": "여행 목적지 (예: 제주도, 경주, 과천)",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "관광지 유형 (예: 실내, 자연, 역사, 데이트, 체험). 생략 가능.",
+                },
+                "travel_style": {
+                    "type": "string",
+                    "description": "여행 스타일 (예: 힐링, 액티비티, 감성, 가족). 생략 가능.",
+                },
+                "age": {
+                    "type": "integer",
+                    "description": "사용자 나이. 생략 가능.",
+                },
+                "travel_date": {
+                    "type": "string",
+                    "description": "여행 날짜 (예: 2026-07-20, 이번 주말). 생략 가능.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "추천 개수 (기본값 5)",
+                },
+            },
+            "required": ["destination"],
+        },
+    },
+}
 
     # TourAPI 상세조회만 따로 테스트하고 싶을 때
     # detail = get_tour_api_detail_by_place("국립과천과학관")
