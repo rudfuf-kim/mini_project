@@ -2,15 +2,54 @@
 Tool 4 — 여행 일정 생성 (generate_itinerary)
 사용 모델 : OpenAI GPT-4o mini
 비용      : 소액 유료 (데모 수준 $1 미만)
+
+[변경 사항]
+이 함수는 더 이상 목적지/기간/스타일만으로 일정을 생성하지 않습니다.
+일정 생성 시 다음 4개 tool을 내부에서 자동으로 호출하여 실제 데이터를 모은 뒤,
+그 결과를 바탕으로 LLM에게 일정을 작성하게 합니다.
+
+  - get_weather          (tool_weather.py)
+  - search_restaurants   (tool_restaurant.py)
+  - search_attractions   (tool_attraction.py)
+  - get_highway_traffic  (tool_transit.py)  ← origin이 있을 때만 호출
+
+각 호출은 개별적으로 try/except 처리되어, 특정 tool이 실패하거나
+키가 설정되지 않아도 나머지 정보로 일정 생성을 계속 진행합니다.
 """
 
 import os
+from typing import Optional
+
 from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# ── 다른 팀원 Tool 모듈 import ──────────────────────
+# 팀원 코드에 일시적 오류가 있어도 일정 생성 자체가 죽지 않도록
+# 모듈 단위로 안전하게 import 합니다.
+try:
+    from tool_weather import get_weather
+except Exception:
+    get_weather = None
+
+try:
+    from tool_restaurant import search_restaurants
+except Exception:
+    search_restaurants = None
+
+try:
+    from tool_attraction import search_attractions
+except Exception:
+    search_attractions = None
+
+try:
+    from tool_transit import get_highway_traffic
+except Exception:
+    get_highway_traffic = None
+
 
 STYLE_DESC = {
     "힐링":   "조용하고 여유로운 자연·카페 위주 일정",
@@ -21,40 +60,137 @@ STYLE_DESC = {
 }
 
 SYSTEM_PROMPT = """당신은 대한민국 국내 여행 전문 플래너입니다.
-사용자의 목적지, 기간, 여행 스타일을 바탕으로 현실적이고 구체적인 국내 여행 일정을 만들어 주세요.
+아래 제공되는 [실제 데이터]를 최대한 활용해서 현실적이고 구체적인 국내 여행 일정을 만들어 주세요.
 
 규칙:
-- 실제 존재하는 장소와 명소만 추천하세요.
+- [실제 데이터]에 있는 날씨, 맛집, 관광지, 교통 정보를 일정에 적극 반영하세요.
+  (예: 비 예보가 있으면 실내 관광지 위주로 조정, 제공된 맛집/관광지 이름을 실제로 일정에 배치)
+- [실제 데이터]에 없는 내용이 필요하면, 알고 있는 실제 장소로 보완하되 지어내지 마세요.
 - 이동 동선을 고려해 가까운 곳끼리 묶어주세요.
 - 오전/오후/저녁 시간대로 구분하여 작성하세요.
 - 예상 비용(입장료, 식비 등)을 간략히 포함하세요.
 - 제주도의 경우 렌터카 이동을 권장하세요.
 - 비현실적인 일정(당일치기 제주 등)은 정중히 수정 제안하세요.
+- 교통 정보가 없다면 일정에서 이동 수단을 언급하지 말고, 다른 정보만으로 일정을 구성하세요.
 """
 
 
-def generate_itinerary(destination: str, duration: int, style: str = "힐링") -> dict:
+# ── 보조 함수: 각 tool 결과를 안전하게 호출하고 요약 ──────
+def _safe_call(func, *args, **kwargs) -> Optional[dict]:
+    """tool 함수가 없거나 호출 중 예외가 나도 None을 반환해 흐름이 끊기지 않게 한다."""
+    if func is None:
+        return None
+    try:
+        result = func(*args, **kwargs)
+        if isinstance(result, dict) and result.get("error"):
+            return None
+        return result
+    except Exception:
+        return None
+
+
+def _summarize_weather(weather: Optional[dict]) -> str:
+    if not weather:
+        return "- 날씨 정보: 조회 실패 (참고 없이 진행)"
+    lines = [f"- 현재 날씨: {weather.get('날씨', '-')}, {weather.get('현재기온', '-')}"]
+    forecast = weather.get("예보", [])
+    if forecast:
+        lines.append("- 일별 예보:")
+        for f in forecast:
+            lines.append(
+                f"  · {f.get('날짜')}: {f.get('날씨')} "
+                f"(최고 {f.get('최고기온')} / 최저 {f.get('최저기온')}, 강수확률 {f.get('강수확률')})"
+            )
+    if weather.get("옷차림추천"):
+        lines.append(f"- 옷차림 추천: {weather['옷차림추천']}")
+    return "\n".join(lines)
+
+
+def _summarize_restaurants(restaurants: Optional[dict]) -> str:
+    if not restaurants or not restaurants.get("맛집목록"):
+        return "- 맛집 정보: 조회 실패 (참고 없이 진행)"
+    lines = ["- 추천 맛집 목록:"]
+    for r in restaurants["맛집목록"]:
+        lines.append(f"  · {r.get('이름')} ({r.get('카테고리')}) - {r.get('주소')}")
+    return "\n".join(lines)
+
+
+def _summarize_attractions(attractions: Optional[dict]) -> str:
+    if not attractions or not attractions.get("results"):
+        return "- 관광지 정보: 조회 실패 (참고 없이 진행)"
+    lines = ["- 추천 관광지 목록:"]
+    for a in attractions["results"]:
+        lines.append(
+            f"  · {a.get('name')} ({a.get('category')}) - "
+            f"운영시간: {a.get('opening_hours')}, 입장료: {a.get('admission_fee')}"
+        )
+    return "\n".join(lines)
+
+
+def _summarize_transit(transit: Optional[dict], origin: Optional[str]) -> str:
+    if not origin:
+        return "- 교통 정보: 출발지가 입력되지 않아 조회하지 않았습니다."
+    if not transit:
+        return "- 교통 정보: 조회 실패 (참고 없이 진행)"
+    if transit.get("notice"):
+        return f"- 교통 정보: {transit['notice']} / {transit.get('recommended', '')}"
+    sections = transit.get("sections")
+    if sections:
+        lines = [f"- {transit.get('route', '')} 실시간 소통 정보:"]
+        for s in sections:
+            lines.append(f"  · {s.get('구간')}: 혼잡도 {s.get('혼잡도')}, 평균속도 {s.get('평균속도')}")
+        return "\n".join(lines)
+    return "- 교통 정보: 데이터 없음"
+
+
+def generate_itinerary(
+    destination: str,
+    duration: int,
+    style: str = "힐링",
+    origin: Optional[str] = None,
+) -> dict:
     """
-    LLM을 활용해 국내 맞춤 여행 일정을 생성합니다.
+    날씨·맛집·관광지·교통 정보를 종합하여 국내 맞춤 여행 일정을 생성합니다.
 
     Parameters
     ----------
-    destination : str  여행 목적지 (예: 제주도, 부산, 경주)
-    duration    : int  여행 기간 (일수, 1~7)
-    style       : str  여행 스타일 (힐링/액티브/문화/미식/가족)
+    destination : str            여행 목적지 (예: 제주도, 부산, 경주)
+    duration    : int            여행 기간 (일수, 1~7)
+    style       : str            여행 스타일 (힐링/액티브/문화/미식/가족)
+    origin      : str, optional  출발지 (예: 서울). 교통 정보 조회에 사용.
+                                  없으면 교통 정보는 생략됩니다.
 
     Returns
     -------
-    dict  생성된 일정 텍스트 or 에러 메시지
+    dict  생성된 일정 텍스트 + 참고한 데이터 요약 or 에러 메시지
     """
     style_desc = STYLE_DESC.get(style, style)
     duration = max(1, min(duration, 7))
 
+    # ── 1) 다른 tool들을 호출해서 실제 데이터 수집 ──────
+    weather_data = _safe_call(get_weather, destination, duration + 1)
+    restaurant_data = _safe_call(search_restaurants, destination)
+    attraction_data = _safe_call(search_attractions, destination, travel_style=style)
+    transit_data = (
+        _safe_call(get_highway_traffic, origin, destination) if origin else None
+    )
+
+    # ── 2) 데이터 요약 (LLM 프롬프트에 주입할 텍스트) ──────
+    data_summary = "\n\n".join([
+        "[실제 데이터]",
+        _summarize_weather(weather_data),
+        _summarize_restaurants(restaurant_data),
+        _summarize_attractions(attraction_data),
+        _summarize_transit(transit_data, origin),
+    ])
+
     user_prompt = (
         f"목적지: {destination}\n"
         f"기간: {duration}박 {duration + 1}일\n"
-        f"여행 스타일: {style} ({style_desc})\n\n"
-        f"위 조건에 맞는 상세 여행 일정을 Day별로 작성해 주세요."
+        f"여행 스타일: {style} ({style_desc})\n"
+        f"출발지: {origin or '미입력'}\n\n"
+        f"{data_summary}\n\n"
+        f"위 조건과 실제 데이터를 반영해 상세 여행 일정을 Day별로 작성해 주세요."
     )
 
     try:
@@ -64,17 +200,27 @@ def generate_itinerary(destination: str, duration: int, style: str = "힐링") -
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user",   "content": user_prompt},
             ],
-            max_tokens=1200,
+            max_tokens=1500,
             temperature=0.7,
         )
         itinerary_text = response.choices[0].message.content
 
-        return {
+        result = {
             "목적지":   destination,
             "기간":     f"{duration}박 {duration + 1}일",
             "스타일":   style,
             "일정":     itinerary_text,
         }
+
+        # 출발지가 없어서 교통 정보를 못 넣었다면, 메인 LLM이 사용자에게
+        # 출발지를 물어볼 수 있도록 안내 플래그를 함께 반환합니다.
+        if not origin:
+            result["안내"] = (
+                "출발지가 입력되지 않아 교통 정보(이동 수단, 소요 시간, 통행료)는 "
+                "이번 일정에 포함되지 않았습니다. 출발지를 알려주시면 교통 정보를 추가해 드릴 수 있습니다."
+            )
+
+        return result
 
     except Exception as e:
         return {"error": f"일정 생성 실패: {str(e)}"}
@@ -87,7 +233,11 @@ TOOL_SCHEMA = {
         "name": "generate_itinerary",
         "description": (
             "목적지, 여행 기간, 여행 스타일을 입력받아 국내 맞춤 여행 일정을 생성합니다. "
-            "오전·오후·저녁 시간대별로 구체적인 코스와 예상 비용을 포함합니다."
+            "내부적으로 날씨, 맛집, 관광지, (출발지가 있는 경우) 교통 정보를 자동으로 조회하여 "
+            "실제 데이터에 기반한 일정을 만듭니다. "
+            "오전·오후·저녁 시간대별로 구체적인 코스와 예상 비용을 포함합니다. "
+            "사용자가 출발지를 언급하지 않았다면 origin 없이 호출해도 되며, "
+            "결과에 '안내' 필드가 포함되면 사용자에게 출발지를 다시 물어봐야 합니다."
         ),
         "parameters": {
             "type": "object",
@@ -104,6 +254,13 @@ TOOL_SCHEMA = {
                     "type": "string",
                     "enum": ["힐링", "액티브", "문화", "미식", "가족"],
                     "description": "여행 스타일 (기본값: 힐링)",
+                },
+                "origin": {
+                    "type": "string",
+                    "description": (
+                        "출발지 (예: 서울, 부산). 교통 정보를 일정에 포함하려면 필요합니다. "
+                        "사용자가 출발지를 말하지 않았다면 생략하세요."
+                    ),
                 },
             },
             "required": ["destination", "duration"],
