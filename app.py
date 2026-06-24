@@ -50,9 +50,17 @@ SYSTEM_PROMPT = """당신은 대한민국 국내 여행 전문 플래너 챗봇 
 - 날씨 질문 → get_weather
 - 맛집·식당·카페 질문 → search_restaurants
 - 관광지·명소·볼거리 질문 → search_attractions
-- 여행 일정·코스·계획 질문 → generate_itinerary (날씨·맛집·관광지 tool도 함께 사용)
+- 여행 일정·코스·계획 질문 → generate_itinerary
+  (이 tool은 날씨·맛집·관광지 정보를 내부에서 자동으로 가져오므로 별도로 호출할 필요 없음)
 - 고속도로 소통·혼잡 질문 → get_highway_traffic
 - 통행요금·고속도로 비용 질문 → get_highway_fare
+
+여행 일정(generate_itinerary) 호출 시 출발지 처리 원칙:
+- 사용자가 출발지(예: "서울에서", "부산 출발")를 언급했다면 origin 파라미터로 함께 전달하세요.
+- 사용자가 출발지를 언급하지 않았다면 origin 없이 generate_itinerary를 호출해도 됩니다.
+- tool 결과에 "안내" 필드가 포함되어 있다면(출발지 미입력으로 교통 정보가 빠졌다는 뜻),
+  일정 답변 끝에 자연스럽게 "어디서 출발하시나요?"라고 물어봐서 출발지를 받아내고,
+  답을 받으면 generate_itinerary를 origin과 함께 다시 호출해 교통 정보를 포함한 일정으로 갱신해 주세요.
 
 답변 규칙:
 - 한국어로 친근하게 답변하세요.
@@ -144,14 +152,11 @@ if not st.session_state.messages:
             if st.button(text, key=f"card_{i}", use_container_width=True):
                 st.session_state["pending_input"] = text
 
-    st.markdown(C.pill_section_divider(), unsafe_allow_html=True)
-    st.markdown('<div class="pill-row">', unsafe_allow_html=True)
     cols2 = st.columns(len(EXAMPLE_PILLS))
     for i, ex in enumerate(EXAMPLE_PILLS):
         with cols2[i]:
             if st.button(ex, key=f"pill_{i}", use_container_width=True):
                 st.session_state["pending_input"] = ex
-    st.markdown('</div>', unsafe_allow_html=True)
 
 else:
     for msg in st.session_state.messages:
@@ -230,3 +235,4 @@ if user_input:
             status_ph.empty()
             answer_ph.markdown(final_answer)
             st.session_state.messages.append({"role": "assistant", "content": final_answer})
+            
