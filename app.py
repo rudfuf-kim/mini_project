@@ -51,15 +51,16 @@ SYSTEM_PROMPT = """당신은 대한민국 국내 여행 전문 플래너 챗봇 
 - 맛집·식당·카페 질문 → search_restaurants
 - 관광지·명소·볼거리 질문 → search_attractions
 - 여행 일정·코스·계획 질문 → generate_itinerary
-  (이 tool은 날씨·맛집·관광지 정보를 내부에서 자동으로 가져오므로 별도로 호출할 필요 없음)
+  (이 tool이 선택되면 관광지·맛집·날씨·교통 정보가 단계적으로 먼저 조회되고,
+   그 결과를 반영해 최종 일정이 만들어집니다. 별도로 다른 tool을 함께 호출할 필요 없습니다.)
 - 고속도로 소통·혼잡 질문 → get_highway_traffic
 - 통행요금·고속도로 비용 질문 → get_highway_fare
 
-여행 일정(generate_itinerary) 호출 시 출발지 처리 원칙:
+여행 일정(generate_itinerary) 관련 출발지 처리 원칙:
 - 사용자가 출발지(예: "서울에서", "부산 출발")를 언급했다면 origin 파라미터로 함께 전달하세요.
 - 사용자가 출발지를 언급하지 않았다면 origin 없이 generate_itinerary를 호출해도 됩니다.
 - tool 결과에 "안내" 필드가 포함되어 있다면(출발지 미입력으로 교통 정보가 빠졌다는 뜻),
-  일정 답변 끝에 자연스럽게 "어디서 출발하시나요?"라고 물어봐서 출발지를 받아내고,
+  답변 끝에 자연스럽게 "어디서 출발하시나요?"라고 물어봐서 출발지를 받아내고,
   답을 받으면 generate_itinerary를 origin과 함께 다시 호출해 교통 정보를 포함한 일정으로 갱신해 주세요.
 
 답변 규칙:
@@ -165,6 +166,93 @@ else:
                 st.markdown(msg["content"])
 
 
+# ── [신규] 일정 생성 단계별 실행 함수 ──────────────
+def run_itinerary_pipeline(itin_args: dict) -> dict:
+    """
+    generate_itinerary가 호출 대상으로 선택되면, 실제로는 이 함수가
+    관광지 → 맛집 → 날씨/교통 순서로 먼저 조회하며 그 결과를
+    화면에 단계별로 출력한 뒤, 마지막에 그 데이터를 모아
+    generate_itinerary에 전달해 최종 일정을 만든다.
+    """
+    destination = itin_args.get("destination")
+    duration = itin_args.get("duration", 1)
+    style = itin_args.get("style", "힐링")
+    origin = itin_args.get("origin")
+
+    # 1) 관광지 검색 → 화면에 먼저 출력
+    st.info("📍 관광지 검색 중...")
+    attractions_data = None
+    try:
+        attractions_data = search_attractions(destination, travel_style=style)
+    except Exception as e:
+        attractions_data = {"error": str(e)}
+    with st.chat_message("assistant"):
+        st.markdown(f"**📍 {destination} 추천 관광지**")
+        if attractions_data and attractions_data.get("results"):
+            for a in attractions_data["results"]:
+                st.markdown(f"- **{a.get('name')}** ({a.get('category')}) — {a.get('address')}")
+        else:
+            st.markdown("관광지 정보를 가져오지 못했습니다.")
+
+    # 2) 맛집 검색 → 화면에 출력
+    st.info("🍽️ 맛집 검색 중...")
+    restaurants_data = None
+    try:
+        restaurants_data = search_restaurants(destination)
+    except Exception as e:
+        restaurants_data = {"error": str(e)}
+    with st.chat_message("assistant"):
+        st.markdown(f"**🍽️ {destination} 추천 맛집**")
+        if restaurants_data and restaurants_data.get("맛집목록"):
+            for r in restaurants_data["맛집목록"]:
+                st.markdown(f"- **{r.get('이름')}** ({r.get('카테고리')}) — {r.get('주소')}")
+        else:
+            st.markdown("맛집 정보를 가져오지 못했습니다.")
+
+    # 3) 날씨 조회 → 화면에 출력
+    st.info("🌤️ 날씨 정보 조회 중...")
+    weather_data = None
+    try:
+        weather_data = get_weather(destination, min(duration + 1, 5))
+    except Exception as e:
+        weather_data = {"error": str(e)}
+    with st.chat_message("assistant"):
+        st.markdown(f"**🌤️ {destination} 날씨**")
+        if weather_data and not weather_data.get("error"):
+            st.markdown(f"- 현재: {weather_data.get('날씨')}, {weather_data.get('현재기온')}")
+        else:
+            st.markdown("날씨 정보를 가져오지 못했습니다.")
+
+    # 4) 교통 조회 (origin이 있을 때만) → 화면에 출력
+    transit_data = None
+    if origin:
+        st.info("🚗 교통 정보 조회 중...")
+        try:
+            transit_data = get_highway_traffic(origin, destination)
+        except Exception as e:
+            transit_data = {"error": str(e)}
+        with st.chat_message("assistant"):
+            st.markdown(f"**🚗 {origin} → {destination} 교통 정보**")
+            if transit_data and not transit_data.get("error"):
+                st.markdown(f"- {transit_data.get('route', '')} 관련 정보 확인 완료")
+            else:
+                st.markdown("교통 정보를 가져오지 못했습니다.")
+
+    # 5) 위 데이터를 모아 최종 일정 생성
+    st.info("📅 여행 일정 생성 중...")
+    result = generate_itinerary(
+        destination=destination,
+        duration=duration,
+        style=style,
+        origin=origin,
+        attractions_data=attractions_data,
+        restaurants_data=restaurants_data,
+        weather_data=weather_data,
+        transit_data=transit_data,
+    )
+    return result
+
+
 # ── 입력 & LLM 처리 ──────────────────────────────
 user_input = st.chat_input("여행지와 기간을 입력하세요… (예: 제주도 2박 3일 여행 계획 짜줘)")
 
@@ -205,15 +293,19 @@ if user_input:
 
         else:
             api_messages.append(msg_obj)
+            status_ph.empty()  # 단계별 출력과 겹치지 않도록 기존 상태 표시는 비움
 
             for tool_call in msg_obj.tool_calls:
                 func_name = tool_call.function.name
                 func_args = json.loads(tool_call.function.arguments)
 
-                status_ph.info(TOOL_STATUS_MSG.get(func_name, f"⚙️ {func_name} 실행 중..."))
-
-                func = TOOL_FUNC_MAP.get(func_name)
-                result = func(**func_args) if func else {"error": f"알 수 없는 tool: {func_name}"}
+                if func_name == "generate_itinerary":
+                    # ── 일정 생성은 단계별 파이프라인으로 처리 ──
+                    result = run_itinerary_pipeline(func_args)
+                else:
+                    status_ph.info(TOOL_STATUS_MSG.get(func_name, f"⚙️ {func_name} 실행 중..."))
+                    func = TOOL_FUNC_MAP.get(func_name)
+                    result = func(**func_args) if func else {"error": f"알 수 없는 tool: {func_name}"}
 
                 api_messages.append({
                     "role":         "tool",
@@ -221,7 +313,7 @@ if user_input:
                     "content":      json.dumps(result, ensure_ascii=False),
                 })
 
-            status_ph.info("✍️ 답변 생성 중...")
+            status_ph.info("✍️ 최종 답변 정리 중...")
 
             try:
                 final_response = client.chat.completions.create(
@@ -235,4 +327,3 @@ if user_input:
             status_ph.empty()
             answer_ph.markdown(final_answer)
             st.session_state.messages.append({"role": "assistant", "content": final_answer})
-            
