@@ -132,9 +132,9 @@ with st.sidebar:
 
     for key, label in [
         ("OPENAI_API_KEY",      "OpenAI API"),
-        ("OPENWEATHER_API_KEY", "OpenWeatherMap"),
+        ("WEATHER_API_KEY", "OpenWeatherMap"),
         ("NAVER_CLIENT_ID",     "네이버 오픈 API"),
-        ("EX_API_KEY",          "한국도로공사 API"),
+        ("TRAFFIC_API_KEY",          "한국도로공사 API"),
     ]:
         icon = "✅" if os.getenv(key) else "❌"
         st.markdown(C.sidebar_api_status(icon, label), unsafe_allow_html=True)
