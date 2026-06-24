@@ -1,14 +1,14 @@
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css');
-
+ 
 html, body, [class*="css"] {
     font-family: 'Pretendard', -apple-system, sans-serif !important;
 }
-
+ 
 /* 전체 배경 */
 .stApp {
     background-color: #FBF8F1;
 }
-
+ 
 /* 사이드바 */
 [data-testid="stSidebar"] {
     background-color: #FFFFFF !important;
@@ -27,7 +27,7 @@ html, body, [class*="css"] {
 [data-testid="stSidebar"] h3 {
     color: #322E29 !important;
 }
-
+ 
 /* 사이드바 버튼 */
 [data-testid="stSidebar"] .stButton > button {
     background-color: #FDCB6E !important;
@@ -44,13 +44,13 @@ html, body, [class*="css"] {
     background-color: #f5be55 !important;
     box-shadow: 0 8px 20px -6px rgba(253,203,110,.9) !important;
 }
-
+ 
 /* 메인 영역 */
 .main .block-container {
     padding: 2rem 2.5rem 2rem !important;
     max-width: 860px !important;
 }
-
+ 
 /* 사용자 말풍선 */
 [data-testid="stChatMessage"][aria-label*="user"] [data-testid="stMarkdownContainer"],
 [data-testid="stChatMessage"][aria-label*="human"] [data-testid="stMarkdownContainer"] {
@@ -62,7 +62,7 @@ html, body, [class*="css"] {
     font-size: 14.5px !important;
     line-height: 1.6 !important;
 }
-
+ 
 /* 봇 말풍선 */
 [data-testid="stChatMessage"][aria-label*="assistant"] [data-testid="stMarkdownContainer"] {
     background: #FFFFFF !important;
@@ -74,7 +74,7 @@ html, body, [class*="css"] {
     color: #3A352C !important;
     box-shadow: 0 4px 16px -8px rgba(120,100,50,.2) !important;
 }
-
+ 
 /* 입력창 */
 [data-testid="stChatInput"] {
     background: #FFFFFF !important;
@@ -92,7 +92,7 @@ html, body, [class*="css"] {
     border-radius: 12px !important;
     color: #3A2E12 !important;
 }
-
+ 
 /* tool 진행 상태 알림 */
 [data-testid="stAlert"] {
     background: #FEF4DD !important;
@@ -100,7 +100,7 @@ html, body, [class*="css"] {
     border-radius: 12px !important;
     color: #6B4F12 !important;
 }
-
+ 
 /* 예시 카드 */
 .suggestion-card {
     background: #FFFFFF;
@@ -109,6 +109,7 @@ html, body, [class*="css"] {
     padding: 18px 16px;
     box-shadow: 0 8px 24px -16px rgba(120,100,50,.4);
     height: 100%;
+    margin-bottom: 0;
 }
 .suggestion-card .icon-box {
     width: 40px;
@@ -126,10 +127,51 @@ html, body, [class*="css"] {
     color: #322E29;
     line-height: 1.45;
 }
-
+ 
+/* 카드 영역과 pill 버튼 영역 사이 구분선 + 여백 */
+.pill-section-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 36px 0 20px;
+}
+.pill-section-divider::before,
+.pill-section-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #F0EBE0;
+}
+.pill-section-divider span {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: #C5BCA8;
+    letter-spacing: .06em;
+    white-space: nowrap;
+}
+ 
+/* pill 버튼 스타일 */
+.pill-row .stButton > button {
+    background: #FFFFFF !important;
+    border: 1.5px solid #ECE5D7 !important;
+    border-radius: 99px !important;
+    color: #6B655A !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    padding: 8px 18px !important;
+    box-shadow: none !important;
+    transition: all .18s ease !important;
+}
+.pill-row .stButton > button:hover {
+    background: #FEF4DD !important;
+    border-color: #FDCB6E !important;
+    color: #3A2E12 !important;
+    box-shadow: 0 4px 12px -6px rgba(253,203,110,.6) !important;
+}
+ 
 /* 구분선 */
 hr { border-color: #F0EBE0 !important; }
-
+ 
 /* 스크롤바 */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-thumb { background: #E5DECF; border-radius: 99px; }
