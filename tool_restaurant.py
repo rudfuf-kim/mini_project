@@ -76,27 +76,27 @@ def search_restaurants(location: str, category: str = "맛집", limit: int = 5) 
         # 4. 결과 문자열 포맷팅 (LLM이 읽기 좋고, Streamlit UI에 띄우기 좋은 형태)
         restaurants = []
 
-for item in items:
-    title = remove_html_tags(item.get("title", "이름 없음"))
-    item_category = item.get("category", "카테고리 없음").split(">")[-1]
-    address = item.get("roadAddress") or item.get("address", "주소 정보 없음")
-    telephone = item.get("telephone", "전화번호 없음")
-    encoded_title = urllib.parse.quote(f"{location} {title}")
-    map_link = f"https://map.naver.com/v5/search/{encoded_title}"
-
-    restaurants.append({
-        "이름":       title,
-        "카테고리":   item_category,
-        "주소":       address,
-        "전화번호":   telephone,
-        "지도링크":   map_link,
-    })
-
-return {
-    "검색어":   query,
-    "결과수":   len(restaurants),
-    "맛집목록": restaurants,
-}
+        for item in items:
+            title = remove_html_tags(item.get("title", "이름 없음"))
+            item_category = item.get("category", "카테고리 없음").split(">")[-1]
+            address = item.get("roadAddress") or item.get("address", "주소 정보 없음")
+            telephone = item.get("telephone", "전화번호 없음")
+            encoded_title = urllib.parse.quote(f"{location} {title}")
+            map_link = f"https://map.naver.com/v5/search/{encoded_title}"
+        
+            restaurants.append({
+                "이름":       title,
+                "카테고리":   item_category,
+                "주소":       address,
+                "전화번호":   telephone,
+                "지도링크":   map_link,
+            })
+        
+        return {
+            "검색어":   query,
+            "결과수":   len(restaurants),
+            "맛집목록": restaurants,
+        }
 
     except requests.exceptions.RequestException as e:
         # 네트워크 관련 오류 처리
