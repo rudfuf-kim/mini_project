@@ -68,6 +68,14 @@ def home_hero() -> str:
     """
 
 
+def pill_section_divider(label: str = "빠른 질문") -> str:
+    return f"""
+    <div class="pill-section-divider">
+        <span>{label}</span>
+    </div>
+    """
+
+
 def suggestion_card(icon: str, bg: str, text: str) -> str:
     return f"""
     <div class="suggestion-card">
