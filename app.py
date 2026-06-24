@@ -145,10 +145,14 @@ if not st.session_state.messages:
                 st.session_state["pending_input"] = text
 
     cols2 = st.columns(len(EXAMPLE_PILLS))
+    st.markdown(C.pill_section_divider(), unsafe_allow_html=True)
+    st.markdown('<div class="pill-row">', unsafe_allow_html=True)
+    cols2 = st.columns(len(EXAMPLE_PILLS))
     for i, ex in enumerate(EXAMPLE_PILLS):
         with cols2[i]:
             if st.button(ex, key=f"pill_{i}", use_container_width=True):
                 st.session_state["pending_input"] = ex
+    st.markdown('</div>', unsafe_allow_html=True)
 
 else:
     for msg in st.session_state.messages:
