@@ -1,18 +1,33 @@
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css');
- 
+
 html, body, [class*="css"] {
     font-family: 'Pretendard', -apple-system, sans-serif !important;
 }
- 
+
+:root {
+    --kw-navy: #062A73;
+    --kw-navy-2: #0B3B91;
+    --kw-magenta: #EC0B8C;
+    --kw-magenta-dark: #C80670;
+    --kw-bg: #F5F8FF;
+    --kw-card: #FFFFFF;
+    --kw-line: #D9E3F8;
+    --kw-text: #102A57;
+    --kw-subtext: #49627E;
+    --kw-muted: #8EA8DA;
+    --kw-soft: #EEF3FF;
+}
+
 /* 전체 배경 */
 .stApp {
-    background-color: #FBF8F1;
+    background: linear-gradient(180deg, #F7F9FF 0%, #F1F5FF 40%, #FFFFFF 100%);
+    color: var(--kw-text);
 }
- 
+
 /* 사이드바 */
 [data-testid="stSidebar"] {
-    background-color: #FFFFFF !important;
-    border-right: 1px solid #F0EBE0;
+    background: linear-gradient(180deg, #062A73 0%, #08255D 100%) !important;
+    border-right: 1px solid rgba(255,255,255,.08);
 }
 [data-testid="stSidebar"] > div {
     padding-top: 1.5rem;
@@ -20,100 +35,101 @@ html, body, [class*="css"] {
 [data-testid="stSidebar"] p,
 [data-testid="stSidebar"] span,
 [data-testid="stSidebar"] label {
-    color: #6B655A !important;
+    color: #E6EEFF !important;
 }
 [data-testid="stSidebar"] h1,
 [data-testid="stSidebar"] h2,
 [data-testid="stSidebar"] h3 {
-    color: #322E29 !important;
+    color: #FFFFFF !important;
 }
- 
+
 /* 사이드바 버튼 */
 [data-testid="stSidebar"] .stButton > button {
-    background-color: #FDCB6E !important;
-    color: #3A2E12 !important;
+    background: linear-gradient(135deg, var(--kw-magenta), var(--kw-magenta-dark)) !important;
+    color: #FFFFFF !important;
     border: none !important;
-    border-radius: 13px !important;
-    font-weight: 700 !important;
+    border-radius: 14px !important;
+    font-weight: 800 !important;
     font-size: 14px !important;
     padding: 12px 16px !important;
-    box-shadow: 0 6px 16px -6px rgba(253,203,110,.7) !important;
+    box-shadow: 0 8px 18px -8px rgba(236, 11, 140, .65) !important;
     width: 100% !important;
 }
 [data-testid="stSidebar"] .stButton > button:hover {
-    background-color: #f5be55 !important;
-    box-shadow: 0 8px 20px -6px rgba(253,203,110,.9) !important;
+    background: linear-gradient(135deg, #F01495, #B90568) !important;
+    box-shadow: 0 10px 22px -8px rgba(236, 11, 140, .78) !important;
 }
- 
+
 /* 메인 영역 */
 .main .block-container {
     padding: 2rem 2.5rem 2rem !important;
-    max-width: 860px !important;
+    max-width: 900px !important;
 }
- 
+
 /* 사용자 말풍선 */
 [data-testid="stChatMessage"][aria-label*="user"] [data-testid="stMarkdownContainer"],
 [data-testid="stChatMessage"][aria-label*="human"] [data-testid="stMarkdownContainer"] {
-    background: #FDCB6E !important;
-    color: #3A2E12 !important;
+    background: linear-gradient(135deg, var(--kw-magenta), var(--kw-magenta-dark)) !important;
+    color: #FFFFFF !important;
     border-radius: 20px 20px 6px 20px !important;
     padding: 14px 18px !important;
-    font-weight: 500 !important;
+    font-weight: 600 !important;
     font-size: 14.5px !important;
     line-height: 1.6 !important;
+    box-shadow: 0 10px 24px -16px rgba(236,11,140,.45) !important;
 }
- 
+
 /* 봇 말풍선 */
 [data-testid="stChatMessage"][aria-label*="assistant"] [data-testid="stMarkdownContainer"] {
-    background: #FFFFFF !important;
-    border: 1px solid #F0EBE0 !important;
+    background: var(--kw-card) !important;
+    border: 1px solid var(--kw-line) !important;
     border-radius: 6px 20px 20px 20px !important;
     padding: 16px 18px !important;
     font-size: 14.5px !important;
     line-height: 1.7 !important;
-    color: #3A352C !important;
-    box-shadow: 0 4px 16px -8px rgba(120,100,50,.2) !important;
+    color: var(--kw-text) !important;
+    box-shadow: 0 8px 24px -18px rgba(6,42,115,.28) !important;
 }
- 
+
 /* 입력창 */
 [data-testid="stChatInput"] {
     background: #FFFFFF !important;
-    border: 1px solid #ECE5D7 !important;
+    border: 1px solid var(--kw-line) !important;
     border-radius: 20px !important;
-    box-shadow: 0 8px 28px -16px rgba(120,100,50,.4) !important;
+    box-shadow: 0 10px 30px -18px rgba(6,42,115,.30) !important;
 }
 [data-testid="stChatInput"] textarea {
     font-family: 'Pretendard', sans-serif !important;
     font-size: 15px !important;
-    color: #3A352C !important;
+    color: var(--kw-text) !important;
 }
 [data-testid="stChatInput"] button {
-    background: #FDCB6E !important;
+    background: var(--kw-navy) !important;
     border-radius: 12px !important;
-    color: #3A2E12 !important;
+    color: #FFFFFF !important;
 }
- 
+
 /* tool 진행 상태 알림 */
 [data-testid="stAlert"] {
-    background: #FEF4DD !important;
-    border: 1px solid #F5E4B0 !important;
+    background: #F2F6FF !important;
+    border: 1px solid #CFDBF6 !important;
     border-radius: 12px !important;
-    color: #6B4F12 !important;
+    color: var(--kw-text) !important;
 }
- 
+
 /* 예시 카드 */
 .suggestion-card {
     background: #FFFFFF;
-    border: 1px solid #F0EBE0;
+    border: 1px solid var(--kw-line);
     border-radius: 18px;
     padding: 18px 16px;
-    box-shadow: 0 8px 24px -16px rgba(120,100,50,.4);
+    box-shadow: 0 10px 26px -18px rgba(6,42,115,.28);
     height: 100%;
-    margin-bottom: 16px;  /* ← 이 줄 추가 (기존 0 → 16px) */
+    margin-bottom: 16px;
 }
 .suggestion-card .icon-box {
-    width: 40px;
-    height: 40px;
+    width: 42px;
+    height: 42px;
     border-radius: 12px;
     display: flex;
     align-items: center;
@@ -123,11 +139,11 @@ html, body, [class*="css"] {
 }
 .suggestion-card .card-title {
     font-size: 14px;
-    font-weight: 700;
-    color: #322E29;
+    font-weight: 800;
+    color: var(--kw-text);
     line-height: 1.45;
 }
- 
+
 /* 카드 영역과 pill 버튼 영역 사이 구분선 + 여백 */
 .pill-section-divider {
     display: flex;
@@ -140,39 +156,50 @@ html, body, [class*="css"] {
     content: '';
     flex: 1;
     height: 1px;
-    background: #F0EBE0;
+    background: var(--kw-line);
 }
 .pill-section-divider span {
     font-size: 11.5px;
-    font-weight: 600;
-    color: #C5BCA8;
+    font-weight: 700;
+    color: var(--kw-muted);
     letter-spacing: .06em;
     white-space: nowrap;
 }
- 
+
 /* pill 버튼 스타일 */
 .pill-row .stButton > button {
     background: #FFFFFF !important;
-    border: 1.5px solid #ECE5D7 !important;
+    border: 1.5px solid var(--kw-line) !important;
     border-radius: 99px !important;
-    color: #6B655A !important;
+    color: var(--kw-subtext) !important;
     font-size: 13px !important;
-    font-weight: 600 !important;
+    font-weight: 700 !important;
     padding: 8px 18px !important;
     box-shadow: none !important;
     transition: all .18s ease !important;
 }
 .pill-row .stButton > button:hover {
-    background: #FEF4DD !important;
-    border-color: #FDCB6E !important;
-    color: #3A2E12 !important;
-    box-shadow: 0 4px 12px -6px rgba(253,203,110,.6) !important;
+    background: #F8FAFF !important;
+    border-color: var(--kw-magenta) !important;
+    color: var(--kw-magenta-dark) !important;
+    box-shadow: 0 6px 16px -10px rgba(236,11,140,.55) !important;
 }
- 
+
+/* 일반 버튼 */
+.stButton > button {
+    border-color: var(--kw-line) !important;
+}
+.stButton > button:hover {
+    border-color: var(--kw-magenta) !important;
+}
+
 /* 구분선 */
-hr { border-color: #F0EBE0 !important; }
- 
+hr {
+    border-color: var(--kw-line) !important;
+}
+
 /* 스크롤바 */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-thumb { background: #E5DECF; border-radius: 99px; }
+::-webkit-scrollbar { width: 7px; }
+::-webkit-scrollbar-thumb { background: #C6D4F2; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #8EA8DA; }
 ::-webkit-scrollbar-track { background: transparent; }
