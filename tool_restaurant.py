@@ -2,6 +2,8 @@ import os
 import requests
 import urllib.parse
 import re
+import logging
+from functools import lru_cache
 from dotenv import load_dotenv
 
 # 1. 환경 변수 로드 (보안 유지)
@@ -17,6 +19,7 @@ def remove_html_tags(text: str) -> str:
     clean = re.compile('<.*?>')
     return re.sub(clean, '', text)
 
+@lru_cache(maxsize=100)
 def search_restaurants(location: str, category: str = "맛집", limit: int = 5) -> str:
     """
     네이버 지역 검색 API를 사용하여 여행지 주변의 맛집/카페를 검색합니다.
