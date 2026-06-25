@@ -9,7 +9,7 @@ def sidebar_header() -> str:
         <div style="width:34px; height:34px; border-radius:11px; background:#FDCB6E;
                     display:flex; align-items:center; justify-content:center; font-size:18px;">🗺️</div>
         <span style="font-size:19px; font-weight:800; color:#322E29; letter-spacing:-.01em;">
-            TravelMate KR
+            TravelMate
         </span>
     </div>
     """
