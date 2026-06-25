@@ -64,6 +64,34 @@ AREA_CODE_FALLBACK = {
     "제주": "39", "제주도": "39", "제주특별자치도": "39",
 }
 
+# 시/군/구명만 들어왔을 때 광역 areaCode를 보정하기 위한 fallback.
+# TourAPI areaCode2의 1차 호출은 주로 광역시/도만 반환하므로
+# "강릉", "경주", "전주"처럼 시 단위 목적지는 여기서 먼저 areaCode를 잡아준다.
+CITY_AREA_CODE_FALLBACK = {
+    # 경기
+    "수원": "31", "성남": "31", "고양": "31", "용인": "31", "과천": "31",
+    "파주": "31", "가평": "31", "양평": "31", "화성": "31", "평택": "31",
+    # 강원
+    "강릉": "32", "속초": "32", "춘천": "32", "양양": "32", "동해": "32",
+    "삼척": "32", "평창": "32", "정선": "32", "원주": "32", "홍천": "32",
+    # 충북/충남
+    "청주": "33", "충주": "33", "제천": "33", "단양": "33",
+    "천안": "34", "공주": "34", "보령": "34", "태안": "34", "서산": "34", "아산": "34",
+    # 전북/전남
+    "전주": "37", "군산": "37", "익산": "37", "남원": "37",
+    "여수": "38", "순천": "38", "목포": "38", "담양": "38", "나주": "38", "해남": "38",
+    # 경북/경남
+    "경주": "35", "포항": "35", "안동": "35", "영주": "35", "문경": "35",
+    "통영": "36", "거제": "36", "진주": "36", "창원": "36", "김해": "36", "남해": "36",
+    # 광역시 안의 대표 구/지역
+    "해운대": "6", "광안리": "6", "서면": "6",
+    "송도": "2", "월미도": "2",
+}
+
+# TourAPI에서 시/군/구 전체 목록을 한 번 훑어 동적으로 지역을 찾기 위한 캐시.
+# 고정 fallback에 없는 지역도 최대한 처리하기 위함.
+_SIGUNGU_INDEX_CACHE: Optional[List[Dict[str, str]]] = None
+
 PRICE_LABELS = {
     "UNDER_100K": "10만원 미만",
     "UNDER_200K": "20만원 미만",
@@ -84,6 +112,56 @@ def clean_text(text: Optional[str]) -> str:
     text = re.sub(r"<br\s*/?>", " ", text, flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", "", text)
     text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def extract_first_url(text: Optional[str]) -> str:
+    """TourAPI homepage/reservationurl처럼 HTML anchor로 오는 값에서 실제 URL만 추출."""
+    if not text:
+        return ""
+    raw = html.unescape(str(text)).strip()
+
+    # 예: <a href="https://example.com" target="_blank">홈페이지</a>
+    href_match = re.search(r"href=[\"']?([^\"' >]+)", raw, flags=re.IGNORECASE)
+    if href_match:
+        return href_match.group(1).strip()
+
+    url_match = re.search(r"https?://[^\s<>\"']+", raw)
+    if url_match:
+        return url_match.group(0).rstrip(".,)")
+
+    return ""
+
+
+def normalize_destination_for_region(destination: Optional[str]) -> str:
+    """
+    LLM이나 사용자가 "강릉 추천 숙박시설", "강릉 2박 3일 여행 일정"처럼
+    지역명 외의 요청 표현을 함께 넘긴 경우 TourAPI 지역코드 검색이 실패하지 않도록
+    순수 지역명에 가깝게 정리한다.
+    """
+    text = clean_text(destination)
+    if not text:
+        return ""
+
+    # 출발지 표현 제거: "서울에서 강릉", "서울 → 강릉"
+    text = re.sub(r".*에서\s+", "", text)
+    text = re.sub(r".*[→>-]\s*", "", text)
+
+    # 기간/요청 표현 제거
+    text = re.sub(r"\d+\s*박\s*\d+\s*일", "", text)
+    text = re.sub(r"당일치기|여행|일정|계획|코스|추천|찾아줘|알려줘|해줘|짜줘|부탁해", "", text)
+
+    # 숙박 관련 단어 제거
+    text = re.sub(
+        r"숙박시설|숙박|숙소|호텔|펜션|게스트하우스|리조트|풀빌라|고급호텔|가성비|감성숙소",
+        "",
+        text,
+    )
+
+    # 문장부호/불필요 공백 정리
+    text = re.sub(r"[,.!?~]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
     return text
 
 
@@ -261,31 +339,187 @@ def _is_price_match(estimated_label: str, requested_code: str) -> bool:
 
 
 # ── TourAPI 지역/숙박 조회 ─────────────────────────
-def get_area_code(destination: str) -> Dict[str, Optional[str]]:
-    """여행지명에서 TourAPI areaCode를 찾는다."""
-    if not TOUR_API_KEY:
-        return {"area_code": AREA_CODE_FALLBACK.get(destination), "area_name": destination, "source": "fallback"}
+def _load_sigungu_index() -> List[Dict[str, str]]:
+    """
+    TourAPI areaCode2를 이용해 전국 시/군/구 목록을 동적으로 만든다.
+    고정 매핑에 없는 도시도 찾기 위한 fallback 인덱스다.
+    """
+    global _SIGUNGU_INDEX_CACHE
 
+    if _SIGUNGU_INDEX_CACHE is not None:
+        return _SIGUNGU_INDEX_CACHE
+
+    index: List[Dict[str, str]] = []
+    if not TOUR_API_KEY:
+        _SIGUNGU_INDEX_CACHE = index
+        return index
+
+    area_data = safe_get(
+        TOUR_AREA_CODE_URL,
+        params=_tour_params({"numOfRows": 50, "pageNo": 1}),
+        timeout=10,
+    )
+    area_items = _extract_tour_items(area_data)
+
+    for area_item in area_items:
+        area_code = str(area_item.get("code") or "")
+        area_name = clean_text(area_item.get("name"))
+        if not area_code:
+            continue
+
+        sigungu_data = safe_get(
+            TOUR_AREA_CODE_URL,
+            params=_tour_params({"areaCode": area_code, "numOfRows": 200, "pageNo": 1}),
+            timeout=10,
+        )
+        sigungu_items = _extract_tour_items(sigungu_data)
+
+        for sigungu_item in sigungu_items:
+            sigungu_code = str(sigungu_item.get("code") or "")
+            sigungu_name = clean_text(sigungu_item.get("name"))
+            if not sigungu_code or not sigungu_name:
+                continue
+            index.append({
+                "area_code": area_code,
+                "area_name": area_name,
+                "sigungu_code": sigungu_code,
+                "sigungu_name": sigungu_name,
+            })
+
+    _SIGUNGU_INDEX_CACHE = index
+    return index
+
+
+def find_area_sigungu_by_destination(destination: str) -> Dict[str, Optional[str]]:
+    """
+    고정 매핑과 광역 areaCode 매칭이 실패했을 때,
+    전국 시/군/구 목록에서 목적지명을 찾아 areaCode와 sigunguCode를 함께 반환한다.
+    예: "공주" → 충남 areaCode + 공주시 sigunguCode
+    """
+    lookup_text = normalize_destination_for_region(destination) or clean_text(destination)
+    compact_destination = lookup_text.replace(" ", "")
+
+    if not compact_destination:
+        return {
+            "area_code": None,
+            "area_name": None,
+            "sigungu_code": None,
+            "sigungu_name": None,
+            "source": "none",
+        }
+
+    for row in _load_sigungu_index():
+        sigungu_name = row.get("sigungu_name", "")
+        compact_sigungu = sigungu_name.replace(" ", "")
+        # "공주시"와 "공주"가 모두 매칭되도록 흔한 행정 접미사를 제거한 이름도 비교한다.
+        compact_sigungu_base = re.sub(r"(특별자치시|특별자치도|광역시|특별시|시|군|구)$", "", compact_sigungu)
+
+        if (
+            compact_sigungu in compact_destination
+            or compact_destination in compact_sigungu
+            or compact_sigungu_base in compact_destination
+            or compact_destination in compact_sigungu_base
+        ):
+            return {
+                "area_code": row.get("area_code"),
+                "area_name": row.get("area_name"),
+                "sigungu_code": row.get("sigungu_code"),
+                "sigungu_name": sigungu_name,
+                "source": "tour_api_sigungu_scan",
+            }
+
+    return {
+        "area_code": None,
+        "area_name": lookup_text,
+        "sigungu_code": None,
+        "sigungu_name": None,
+        "source": "none",
+    }
+
+
+def get_area_code(destination: str) -> Dict[str, Optional[str]]:
+    """
+    여행지명에서 TourAPI areaCode를 찾는다.
+
+    처리 순서:
+    1) 사용자가 넘긴 문장을 순수 지역명으로 정리
+    2) 자주 쓰는 시/군 fallback 확인
+    3) 광역시/도 fallback 확인
+    4) TourAPI 광역 areaCode 직접 매칭
+    5) TourAPI 전국 시/군/구 목록 동적 스캔
+    """
+    cleaned_destination = normalize_destination_for_region(destination)
+    lookup_text = cleaned_destination or clean_text(destination)
+    compact_destination = lookup_text.replace(" ", "")
+
+    # 1) 시/군/구명 fallback
+    for key, code in CITY_AREA_CODE_FALLBACK.items():
+        if key.replace(" ", "") in compact_destination:
+            return {
+                "area_code": code,
+                "area_name": key,
+                "sigungu_code_hint": None,
+                "sigungu_name_hint": key,
+                "source": "city_fallback",
+            }
+
+    # 2) 광역시/도 fallback
+    for key, code in AREA_CODE_FALLBACK.items():
+        if key.replace(" ", "") in compact_destination:
+            return {
+                "area_code": code,
+                "area_name": key,
+                "sigungu_code_hint": None,
+                "sigungu_name_hint": None,
+                "source": "fallback",
+            }
+
+    if not TOUR_API_KEY:
+        return {
+            "area_code": None,
+            "area_name": lookup_text or destination,
+            "sigungu_code_hint": None,
+            "sigungu_name_hint": None,
+            "source": "none",
+        }
+
+    # 3) TourAPI areaCode2 광역 지역명 직접 조회
     data = safe_get(TOUR_AREA_CODE_URL, params=_tour_params({"numOfRows": 50, "pageNo": 1}))
     items = _extract_tour_items(data)
 
-    normalized_destination = destination.replace(" ", "")
     for item in items:
         name = clean_text(item.get("name"))
         code = str(item.get("code") or "")
         if not name or not code:
             continue
         normalized_name = name.replace(" ", "")
-        if normalized_name in normalized_destination or normalized_destination in normalized_name:
-            return {"area_code": code, "area_name": name, "source": "tour_api"}
+        if normalized_name in compact_destination or compact_destination in normalized_name:
+            return {
+                "area_code": code,
+                "area_name": name,
+                "sigungu_code_hint": None,
+                "sigungu_name_hint": None,
+                "source": "tour_api",
+            }
 
-    # fallback: 대표 행정구역명 일부 포함 처리
-    for key, code in AREA_CODE_FALLBACK.items():
-        if key in destination:
-            return {"area_code": code, "area_name": key, "source": "fallback"}
+    # 4) 전국 시/군/구 동적 스캔
+    scanned = find_area_sigungu_by_destination(lookup_text)
+    if scanned.get("area_code"):
+        return {
+            "area_code": scanned.get("area_code"),
+            "area_name": scanned.get("area_name"),
+            "sigungu_code_hint": scanned.get("sigungu_code"),
+            "sigungu_name_hint": scanned.get("sigungu_name"),
+            "source": scanned.get("source"),
+        }
 
-    return {"area_code": None, "area_name": None, "source": "none"}
-
+    return {
+        "area_code": None,
+        "area_name": lookup_text or destination,
+        "sigungu_code_hint": None,
+        "sigungu_name_hint": None,
+        "source": "none",
+    }
 
 def get_sigungu_code(area_code: str, destination: str) -> Dict[str, Optional[str]]:
     """areaCode 내부에서 destination에 맞는 sigunguCode를 찾는다. 없으면 None."""
@@ -298,7 +532,7 @@ def get_sigungu_code(area_code: str, destination: str) -> Dict[str, Optional[str
     )
     items = _extract_tour_items(data)
 
-    normalized_destination = destination.replace(" ", "")
+    normalized_destination = normalize_destination_for_region(destination).replace(" ", "")
     for item in items:
         name = clean_text(item.get("name"))
         code = str(item.get("code") or "")
@@ -356,6 +590,7 @@ def get_stay_detail_common(content_id: str, content_type_id: str = "32") -> Dict
         "title": clean_text(item.get("title")),
         "overview": clean_text(item.get("overview")),
         "homepage": clean_text(item.get("homepage")),
+        "homepage_url": extract_first_url(item.get("homepage")),
         "tel": clean_text(item.get("tel")),
         "address": clean_text(item.get("addr1")),
         "address_detail": clean_text(item.get("addr2")),
@@ -389,7 +624,7 @@ def get_stay_detail_intro(content_id: str, content_type_id: str = "32") -> Dict[
         "room_type": clean_text(raw.get("roomtype")) or "정보 확인 필요",
         "parking": clean_text(raw.get("parkinglodging")) or "정보 확인 필요",
         "reservation": clean_text(raw.get("reservationlodging")) or "정보 확인 필요",
-        "reservation_url": clean_text(raw.get("reservationurl")) or "",
+        "reservation_url": extract_first_url(raw.get("reservationurl")) or clean_text(raw.get("reservationurl")) or "",
         "info_center": clean_text(raw.get("infocenterlodging")) or "정보 확인 필요",
         "food_place": clean_text(raw.get("foodplace")) or "정보 확인 필요",
         "subfacility": clean_text(raw.get("subfacility")) or "정보 확인 필요",
@@ -483,6 +718,112 @@ def summarize_stay_blog_reviews(blog_items: List[Dict[str, Any]], price_range: O
     return f"블로그 후기에서는 '{desc[:80]}' 등의 내용이 확인됩니다."
 
 
+def build_blog_fallback_stay_results(
+    destination: str,
+    travel_date: Optional[str] = None,
+    check_in: Optional[str] = None,
+    check_out: Optional[str] = None,
+    price_range: Optional[str] = None,
+    stay_type: Optional[str] = None,
+    limit: int = 5,
+    reason: str = "TourAPI 지역 코드 매핑 실패",
+) -> dict:
+    """
+    TourAPI 지역 코드 매핑 또는 숙박시설 조회가 실패했을 때
+    네이버 블로그 검색 결과를 기반으로 최소한의 숙박 후보 정보를 반환한다.
+    """
+    cleaned_destination = normalize_destination_for_region(destination) or clean_text(destination)
+    if not cleaned_destination:
+        cleaned_destination = destination or "해당 지역"
+
+    price_code = normalize_price_range(price_range)
+    price_label = PRICE_LABELS.get(price_code, "가격대 무관")
+
+    blog_items = search_naver_stay_blogs(
+        destination=cleaned_destination,
+        stay_name=None,
+        price_range=price_range,
+        limit=max(limit, 3),
+    )
+
+    results: List[Dict[str, Any]] = []
+    for idx, blog in enumerate(blog_items[:limit], start=1):
+        blog_title = blog.get("title") or f"{cleaned_destination} 숙소 추천 후기"
+        blog_desc = blog.get("description") or ""
+        estimated_price, estimated_stay_type = estimate_price_range(
+            blog_title,
+            stay_type,
+            [blog],
+        )
+        final_stay_type = stay_type or estimated_stay_type
+        search_name = f"{cleaned_destination} 숙소 추천"
+        maps = build_stay_map_links(cleaned_destination, search_name)
+
+        results.append({
+            "name": f"{cleaned_destination} 숙소 추천 후기 {idx}",
+            "category": "숙박",
+            "stay_type": final_stay_type,
+            "estimated_price_range": estimated_price,
+            "price_note": PRICE_NOTE,
+            "summary": blog_desc or f"{cleaned_destination} 숙소 추천 블로그 후기를 기반으로 한 참고 후보입니다.",
+            "address": "블로그 기반 추천으로 주소 확인 필요",
+            "check_in": "정보 확인 필요",
+            "check_out": "정보 확인 필요",
+            "room_count": "정보 확인 필요",
+            "room_type": "정보 확인 필요",
+            "parking": "정보 확인 필요",
+            "reservation": "정보 확인 필요",
+            "info_center": "정보 확인 필요",
+            "homepage": "",
+            "official_homepage_url": "",
+            "image_url": "",
+            "naver_map_url": maps["naver_map_url"],
+            "kakao_map_url": maps["kakao_map_url"],
+            "blog_review_summary": summarize_stay_blog_reviews([blog], price_range=price_label),
+            "blog_links": [blog.get("link")] if blog.get("link") else [],
+            "blog_reference": {
+                "title": blog_title,
+                "description": blog_desc,
+                "postdate": blog.get("postdate", ""),
+                "bloggername": blog.get("bloggername", ""),
+                "query": blog.get("query", ""),
+            },
+            "tour_api": {
+                "matched": False,
+                "fallback_reason": reason,
+                "area_code": None,
+                "sigungu_code": None,
+                "content_id": None,
+                "content_type_id": None,
+            },
+            "source": "naver_blog_fallback",
+            "confidence": "low",
+        })
+
+    return {
+        "destination": cleaned_destination,
+        "travel_date": travel_date,
+        "check_in": check_in,
+        "check_out": check_out,
+        "price_range": price_range or "가격대 무관",
+        "price_range_code": price_code,
+        "area": {"area_code": None, "area_name": cleaned_destination, "source": "blog_fallback"},
+        "sigungu": {"sigungu_code": None, "sigungu_name": None, "source": "blog_fallback"},
+        "results": results,
+        "message": (
+            f"{reason}으로 TourAPI 숙박시설 목록을 직접 가져오지 못해 "
+            f"네이버 블로그의 '{cleaned_destination} 숙소 추천' 검색 결과를 참고 정보로 제공합니다."
+            if results
+            else f"{reason}으로 TourAPI 숙박시설 목록을 가져오지 못했고, 네이버 블로그 후기 결과도 부족합니다."
+        ),
+        "notice": (
+            "이 결과는 블로그 후기 기반 fallback입니다. 실제 예약 전 네이버지도, 공식 홈페이지, 예약 플랫폼에서 "
+            "주소·요금·객실 가능 여부를 반드시 확인하세요."
+        ),
+        "fallback_used": True,
+    }
+
+
 # ── 추천 메인 함수 ────────────────────────────────
 def recommend_stay_place(
     destination: str,
@@ -512,6 +853,12 @@ def recommend_stay_place(
     """
     if not destination:
         return {"error": "destination은 필수 입력값입니다."}
+
+    # app.py 또는 LLM이 "강릉 추천 숙박시설"처럼 넘기는 경우를 대비해
+    # 숙박 Tool 내부에서도 한 번 더 지역명을 정리한다.
+    original_destination = destination
+    destination = normalize_destination_for_region(destination) or destination
+
     if not TOUR_API_KEY:
         return {"error": "TOUR_API_KEY가 .env에 설정되지 않았습니다."}
 
@@ -522,34 +869,40 @@ def recommend_stay_place(
     area = get_area_code(destination)
     area_code = area.get("area_code")
     if not area_code:
-        return {
-            "destination": destination,
-            "travel_date": travel_date,
-            "check_in": check_in,
-            "check_out": check_out,
-            "price_range": price_range,
-            "price_range_code": price_code,
-            "results": [],
-            "message": "지역 코드를 찾지 못했습니다. 예: 제주도, 부산, 강릉처럼 더 넓은 지역명으로 다시 입력해 주세요.",
-        }
+        return build_blog_fallback_stay_results(
+            destination=destination,
+            travel_date=travel_date,
+            check_in=check_in,
+            check_out=check_out,
+            price_range=price_range,
+            stay_type=stay_type,
+            limit=limit,
+            reason="TourAPI 지역 코드 매핑 실패",
+        )
 
-    sigungu = get_sigungu_code(area_code, destination)
+    if area.get("sigungu_code_hint"):
+        sigungu = {
+            "sigungu_code": area.get("sigungu_code_hint"),
+            "sigungu_name": area.get("sigungu_name_hint"),
+            "source": area.get("source") or "hint",
+        }
+    else:
+        sigungu = get_sigungu_code(area_code, destination)
     sigungu_code = sigungu.get("sigungu_code")
 
     # 2) 숙박시설 목록 조회. 필터링 여유를 위해 limit보다 넉넉히 조회
     raw_stays = search_stay_by_area(area_code, sigungu_code, limit=max(limit * 3, 10))
     if not raw_stays:
-        return {
-            "destination": destination,
-            "travel_date": travel_date,
-            "check_in": check_in,
-            "check_out": check_out,
-            "price_range": price_range,
-            "price_range_code": price_code,
-            "results": [],
-            "message": "숙박시설 검색 결과가 없습니다. 네이버에서 지역 숙소 추천 키워드로 확인해 주세요.",
-            "fallback_blog_query": f"{destination} 숙소 추천",
-        }
+        return build_blog_fallback_stay_results(
+            destination=destination,
+            travel_date=travel_date,
+            check_in=check_in,
+            check_out=check_out,
+            price_range=price_range,
+            stay_type=stay_type,
+            limit=limit,
+            reason="TourAPI 숙박시설 검색 결과 없음",
+        )
 
     # 3) 각 숙소 상세조회 + 블로그 후기 + 가격대 추정
     all_results: List[Dict[str, Any]] = []
@@ -566,7 +919,12 @@ def recommend_stay_place(
         name = common.get("title") or raw_title
         address = common.get("address") or clean_text(raw.get("addr1")) or "주소 정보 확인 필요"
         image_url = common.get("first_image") or raw.get("firstimage") or ""
-        homepage = common.get("homepage") or intro.get("reservation_url") or ""
+        homepage = (
+            common.get("homepage_url")
+            or intro.get("reservation_url")
+            or common.get("homepage")
+            or ""
+        )
 
         blog_items = search_naver_stay_blogs(
             destination=destination,
@@ -596,6 +954,7 @@ def recommend_stay_place(
             "reservation": intro.get("reservation") or "정보 확인 필요",
             "info_center": intro.get("info_center") or common.get("tel") or "정보 확인 필요",
             "homepage": homepage,
+            "official_homepage_url": homepage,
             "image_url": image_url,
             "naver_map_url": maps["naver_map_url"],
             "kakao_map_url": maps["kakao_map_url"],
