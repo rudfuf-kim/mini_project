@@ -14,6 +14,7 @@ from tool_restaurant import search_restaurants,                    TOOL_SCHEMA  
 from tool_attraction import search_attractions,                    TOOL_SCHEMA  as ATTRACTION_SCHEMA
 from tool_itinerary  import generate_itinerary,                    TOOL_SCHEMA  as ITINERARY_SCHEMA
 from tool_transit    import get_highway_traffic, get_highway_fare, TOOL_SCHEMAS as TRANSIT_SCHEMAS
+from tool_mbti       import recommend_by_mbti, VALID_MBTI
 import components as C
 
 load_dotenv()
@@ -132,9 +133,9 @@ with st.sidebar:
 
     for key, label in [
         ("OPENAI_API_KEY",      "OpenAI API"),
-        ("WEATHER_API_KEY", "OpenWeatherMap"),
+        ("OPENWEATHER_API_KEY", "OpenWeatherMap"),
         ("NAVER_CLIENT_ID",     "네이버 오픈 API"),
-        ("TRAFFIC_API_KEY",          "한국도로공사 API"),
+        ("EX_API_KEY",          "한국도로공사 API"),
     ]:
         icon = "✅" if os.getenv(key) else "❌"
         st.markdown(C.sidebar_api_status(icon, label), unsafe_allow_html=True)
@@ -159,6 +160,32 @@ if not st.session_state.messages:
             if st.button(ex, key=f"pill_{i}", use_container_width=True):
                 st.session_state["pending_input"] = ex
 
+    # ── [신규] MBTI별 여행지 추천 배너 ──────────────
+    st.markdown(C.mbti_banner(), unsafe_allow_html=True)
+
+    mbti_cols = st.columns([3, 1])
+    with mbti_cols[0]:
+        selected_mbti = st.selectbox(
+            "당신의 MBTI를 선택해 주세요",
+            options=["선택 안 함"] + VALID_MBTI,
+            key="mbti_select",
+        )
+    with mbti_cols[1]:
+        st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+        mbti_clicked = st.button("추천받기", use_container_width=True, key="mbti_submit")
+
+    if mbti_clicked and selected_mbti != "선택 안 함":
+        with st.spinner(f"{selected_mbti} 성향에 맞는 여행지를 찾는 중..."):
+            mbti_result = recommend_by_mbti(selected_mbti)
+
+        if mbti_result.get("error"):
+            st.error(mbti_result["error"])
+        else:
+            st.markdown(f"### 🧭 {selected_mbti}에게 추천하는 국내 여행지")
+            st.markdown(mbti_result["추천"])
+    elif mbti_clicked:
+        st.warning("MBTI를 먼저 선택해 주세요.")
+
 else:
     for msg in st.session_state.messages:
         if msg["role"] in ("user", "assistant"):
@@ -170,76 +197,51 @@ else:
 def run_itinerary_pipeline(itin_args: dict) -> dict:
     """
     generate_itinerary가 호출 대상으로 선택되면, 실제로는 이 함수가
-    관광지 → 맛집 → 날씨/교통 순서로 먼저 조회하며 그 결과를
-    화면에 단계별로 출력한 뒤, 마지막에 그 데이터를 모아
-    generate_itinerary에 전달해 최종 일정을 만든다.
+    관광지 → 맛집 → 날씨 → 교통 → 일정 순서로 데이터를 모두 조회한 뒤,
+    마지막에 한꺼번에 그 순서대로 화면에 출력한다.
+
+    (단계마다 즉시 st.chat_message로 그리면 Streamlit 렌더링 순서가
+     뒤섞여 보일 수 있어서, 모든 조회를 먼저 끝내고 출력은 마지막에 한 번에 한다.)
     """
     destination = itin_args.get("destination")
     duration = itin_args.get("duration", 1)
     style = itin_args.get("style", "힐링")
     origin = itin_args.get("origin")
 
-    # 1) 관광지 검색 → 화면에 먼저 출력
-    st.info("📍 관광지 검색 중...")
-    attractions_data = None
+    status_ph = st.empty()
+
+    # 1) 관광지 검색
+    status_ph.info("📍 관광지 검색 중...")
     try:
         attractions_data = search_attractions(destination, travel_style=style)
     except Exception as e:
         attractions_data = {"error": str(e)}
-    with st.chat_message("assistant"):
-        st.markdown(f"**📍 {destination} 추천 관광지**")
-        if attractions_data and attractions_data.get("results"):
-            for a in attractions_data["results"]:
-                st.markdown(f"- **{a.get('name')}** ({a.get('category')}) — {a.get('address')}")
-        else:
-            st.markdown("관광지 정보를 가져오지 못했습니다.")
 
-    # 2) 맛집 검색 → 화면에 출력
-    st.info("🍽️ 맛집 검색 중...")
-    restaurants_data = None
+    # 2) 맛집 검색
+    status_ph.info("🍽️ 맛집 검색 중...")
     try:
         restaurants_data = search_restaurants(destination)
     except Exception as e:
         restaurants_data = {"error": str(e)}
-    with st.chat_message("assistant"):
-        st.markdown(f"**🍽️ {destination} 추천 맛집**")
-        if restaurants_data and restaurants_data.get("맛집목록"):
-            for r in restaurants_data["맛집목록"]:
-                st.markdown(f"- **{r.get('이름')}** ({r.get('카테고리')}) — {r.get('주소')}")
-        else:
-            st.markdown("맛집 정보를 가져오지 못했습니다.")
 
-    # 3) 날씨 조회 → 화면에 출력
-    st.info("🌤️ 날씨 정보 조회 중...")
-    weather_data = None
+    # 3) 날씨 조회
+    status_ph.info("🌤️ 날씨 정보 조회 중...")
     try:
         weather_data = get_weather(destination, min(duration + 1, 5))
     except Exception as e:
         weather_data = {"error": str(e)}
-    with st.chat_message("assistant"):
-        st.markdown(f"**🌤️ {destination} 날씨**")
-        if weather_data and not weather_data.get("error"):
-            st.markdown(f"- 현재: {weather_data.get('날씨')}, {weather_data.get('현재기온')}")
-        else:
-            st.markdown("날씨 정보를 가져오지 못했습니다.")
 
-    # 4) 교통 조회 (origin이 있을 때만) → 화면에 출력
+    # 4) 교통 조회 (origin이 있을 때만)
     transit_data = None
     if origin:
-        st.info("🚗 교통 정보 조회 중...")
+        status_ph.info("🚗 교통 정보 조회 중...")
         try:
             transit_data = get_highway_traffic(origin, destination)
         except Exception as e:
             transit_data = {"error": str(e)}
-        with st.chat_message("assistant"):
-            st.markdown(f"**🚗 {origin} → {destination} 교통 정보**")
-            if transit_data and not transit_data.get("error"):
-                st.markdown(f"- {transit_data.get('route', '')} 관련 정보 확인 완료")
-            else:
-                st.markdown("교통 정보를 가져오지 못했습니다.")
 
-    # 5) 위 데이터를 모아 최종 일정 생성
-    st.info("📅 여행 일정 생성 중...")
+    # 5) 일정 생성
+    status_ph.info("📅 여행 일정 생성 중...")
     result = generate_itinerary(
         destination=destination,
         duration=duration,
@@ -250,6 +252,49 @@ def run_itinerary_pipeline(itin_args: dict) -> dict:
         weather_data=weather_data,
         transit_data=transit_data,
     )
+    status_ph.empty()
+
+    # ── 6) 여기서부터 순서대로 한 번에 출력 (관광지 → 맛집 → 날씨 → 교통 → 일정) ──
+    with st.chat_message("assistant"):
+        st.markdown(f"**📍 {destination} 추천 관광지**")
+        if attractions_data and attractions_data.get("results"):
+            for a in attractions_data["results"]:
+                map_url = a.get("naver_map_url")
+                line = f"- **{a.get('name')}** ({a.get('category')}) — {a.get('address')}"
+                if a.get("summary"):
+                    line += f"\n  > {a.get('summary')}"
+                if map_url:
+                    line += f"\n  🔗 [네이버지도에서 보기]({map_url})"
+                st.markdown(line)
+        else:
+            st.markdown("관광지 정보를 가져오지 못했습니다.")
+
+    with st.chat_message("assistant"):
+        st.markdown(f"**🍽️ {destination} 추천 맛집**")
+        if restaurants_data and restaurants_data.get("맛집목록"):
+            for r in restaurants_data["맛집목록"]:
+                line = f"- **{r.get('이름')}** ({r.get('카테고리')}) — {r.get('주소')}"
+                if r.get("지도링크"):
+                    line += f"\n  🔗 [네이버지도에서 보기]({r.get('지도링크')})"
+                st.markdown(line)
+        else:
+            st.markdown("맛집 정보를 가져오지 못했습니다.")
+
+    with st.chat_message("assistant"):
+        st.markdown(f"**🌤️ {destination} 날씨**")
+        if weather_data and not weather_data.get("error"):
+            st.markdown(f"- 현재: {weather_data.get('날씨')}, {weather_data.get('현재기온')}")
+        else:
+            st.markdown("날씨 정보를 가져오지 못했습니다.")
+
+    if origin:
+        with st.chat_message("assistant"):
+            st.markdown(f"**🚗 {origin} → {destination} 교통 정보**")
+            if transit_data and not transit_data.get("error"):
+                st.markdown(f"- {transit_data.get('route', '')} 관련 정보 확인 완료")
+            else:
+                st.markdown("교통 정보를 가져오지 못했습니다.")
+
     return result
 
 
@@ -264,66 +309,73 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    with st.chat_message("assistant"):
-        status_ph = st.empty()
-        answer_ph = st.empty()
+    status_ph = st.empty()
 
-        api_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        for msg in st.session_state.messages:
-            if msg["role"] in ("user", "assistant") and msg.get("content"):
-                api_messages.append({"role": msg["role"], "content": msg["content"]})
+    api_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    for msg in st.session_state.messages:
+        if msg["role"] in ("user", "assistant") and msg.get("content"):
+            api_messages.append({"role": msg["role"], "content": msg["content"]})
+
+    status_ph.info("🤔 생각 중...")
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=api_messages,
+            tools=ALL_TOOLS,
+            tool_choice="auto",
+        )
+    except Exception as e:
+        st.error(f"LLM 호출 오류: {e}")
+        st.stop()
+
+    msg_obj = response.choices[0].message
+
+    if not msg_obj.tool_calls:
+        status_ph.empty()
+        final_answer = msg_obj.content or ""
+        with st.chat_message("assistant"):
+            st.markdown(final_answer)
+        st.session_state.messages.append({"role": "assistant", "content": final_answer})
+
+    else:
+        api_messages.append(msg_obj)
+        status_ph.empty()  # 단계별 출력과 겹치지 않도록 기존 상태 표시는 비움
+
+        for tool_call in msg_obj.tool_calls:
+            func_name = tool_call.function.name
+            func_args = json.loads(tool_call.function.arguments)
+
+            if func_name == "generate_itinerary":
+                # ── 일정 생성은 단계별 파이프라인으로 처리 ──
+                # (관광지 → 맛집 → 날씨 → 교통이 먼저 화면에 출력되고, result에는 최종 일정만 담김)
+                result = run_itinerary_pipeline(func_args)
+            else:
+                status_ph.info(TOOL_STATUS_MSG.get(func_name, f"⚙️ {func_name} 실행 중..."))
+                func = TOOL_FUNC_MAP.get(func_name)
+                result = func(**func_args) if func else {"error": f"알 수 없는 tool: {func_name}"}
+                status_ph.empty()
+
+            api_messages.append({
+                "role":         "tool",
+                "tool_call_id": tool_call.id,
+                "content":      json.dumps(result, ensure_ascii=False),
+            })
+
+        status_ph.info("✍️ 최종 답변 정리 중...")
 
         try:
-            response = client.chat.completions.create(
+            final_response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=api_messages,
-                tools=ALL_TOOLS,
-                tool_choice="auto",
             )
+            final_answer = final_response.choices[0].message.content or ""
         except Exception as e:
-            st.error(f"LLM 호출 오류: {e}")
-            st.stop()
+            final_answer = f"답변 생성 중 오류가 발생했습니다: {e}"
 
-        msg_obj = response.choices[0].message
+        status_ph.empty()
 
-        if not msg_obj.tool_calls:
-            final_answer = msg_obj.content or ""
-            answer_ph.markdown(final_answer)
-            st.session_state.messages.append({"role": "assistant", "content": final_answer})
-
-        else:
-            api_messages.append(msg_obj)
-            status_ph.empty()  # 단계별 출력과 겹치지 않도록 기존 상태 표시는 비움
-
-            for tool_call in msg_obj.tool_calls:
-                func_name = tool_call.function.name
-                func_args = json.loads(tool_call.function.arguments)
-
-                if func_name == "generate_itinerary":
-                    # ── 일정 생성은 단계별 파이프라인으로 처리 ──
-                    result = run_itinerary_pipeline(func_args)
-                else:
-                    status_ph.info(TOOL_STATUS_MSG.get(func_name, f"⚙️ {func_name} 실행 중..."))
-                    func = TOOL_FUNC_MAP.get(func_name)
-                    result = func(**func_args) if func else {"error": f"알 수 없는 tool: {func_name}"}
-
-                api_messages.append({
-                    "role":         "tool",
-                    "tool_call_id": tool_call.id,
-                    "content":      json.dumps(result, ensure_ascii=False),
-                })
-
-            status_ph.info("✍️ 최종 답변 정리 중...")
-
-            try:
-                final_response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=api_messages,
-                )
-                final_answer = final_response.choices[0].message.content or ""
-            except Exception as e:
-                final_answer = f"답변 생성 중 오류가 발생했습니다: {e}"
-
-            status_ph.empty()
-            answer_ph.markdown(final_answer)
-            st.session_state.messages.append({"role": "assistant", "content": final_answer})
+        # ── 최종 답변(일정 등) 말풍선은 단계별 출력이 모두 끝난 뒤 가장 마지막에 생성 ──
+        with st.chat_message("assistant"):
+            st.markdown(final_answer)
+        st.session_state.messages.append({"role": "assistant", "content": final_answer})
