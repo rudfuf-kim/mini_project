@@ -109,7 +109,7 @@ html, body, [class*="css"] {
     padding: 18px 16px;
     box-shadow: 0 8px 24px -16px rgba(120,100,50,.4);
     height: 100%;
-    margin-bottom: 0;
+    margin-bottom: 16px;  /* ← 이 줄 추가 (기존 0 → 16px) */
 }
 .suggestion-card .icon-box {
     width: 40px;
