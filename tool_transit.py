@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-EX_API_KEY = os.getenv("TRAFFIC_API_KEY")
+EX_API_KEY = os.getenv("EX_API_KEY")
 
 IC_CODE_MAP = {
     "서울": "1000", "부산": "5100", "대구": "3800",
