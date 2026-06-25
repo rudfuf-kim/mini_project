@@ -1,5 +1,5 @@
 """
-TravelMate KR — 국내 여행 플래너 챗봇
+여키어때 — 국내 여행 플래너 챗봇
 Streamlit + OpenAI Function Calling + 7가지 Tool
 [변경] tool_stay 연결 + 일정 생성 파이프라인 숙박 추천 반영
 """
@@ -16,7 +16,7 @@ from tool_restaurant import search_restaurants,                    TOOL_SCHEMA  
 from tool_attraction import search_attractions,                    TOOL_SCHEMA  as ATTRACTION_SCHEMA
 from tool_stay       import recommend_stay_place,                  TOOL_SCHEMA  as STAY_SCHEMA
 from tool_itinerary  import generate_itinerary,                    TOOL_SCHEMA  as ITINERARY_SCHEMA
-from tool_transit    import get_highway_traffic, get_highway_fare, TOOL_SCHEMAS as TRANSIT_SCHEMAS
+from tool_transit    import get_transit_routes,                    TOOL_SCHEMAS as TRANSIT_SCHEMAS
 from tool_facilities import search_rentcar, search_facilities,     TOOL_SCHEMAS as FACILITY_SCHEMAS
 import components as C
 
@@ -35,8 +35,8 @@ TOOL_FUNC_MAP = {
     "recommend_stay_place": recommend_stay_place,
     "search_accommodations": recommend_stay_place,
     "generate_itinerary":   generate_itinerary,
-    "get_highway_traffic":  get_highway_traffic,
-    "get_highway_fare":     get_highway_fare,
+    "get_transit_routes":   get_transit_routes,
+
     "search_rentcar":       search_rentcar,
     "search_facilities":    search_facilities,
 }
@@ -48,13 +48,13 @@ TOOL_STATUS_MSG = {
     "recommend_stay_place": "🏨 숙박시설 검색 중...",
     "search_accommodations": "🏨 숙박시설 검색 중...",
     "generate_itinerary":  "📅 여행 일정 생성 중...",
-    "get_highway_traffic": "🚗 고속도로 소통 정보 조회 중...",
-    "get_highway_fare":    "🪙 통행요금 조회 중...",
+    "get_transit_routes":  "🚗 교통 경로 조회 중...",
+
     "search_rentcar":      "🚙 렌트카 업체 검색 중...",
     "search_facilities":   "🏪 편의시설 검색 중...",
 }
 
-SYSTEM_PROMPT = """당신은 대한민국 국내 여행 전문 플래너 챗봇 'TravelMate KR'입니다.
+SYSTEM_PROMPT = """당신은 대한민국 국내 여행 전문 플래너 챗봇 '여키어때'입니다.
 
 【여행 일정 요청 시 필수 수집 절차】
 사용자가 여행 일정·계획을 요청하면, 아래 두 정보가 모두 확보될 때까지 tool을 호출하지 말고 대화로 먼저 수집하세요.
@@ -71,8 +71,8 @@ SYSTEM_PROMPT = """당신은 대한민국 국내 여행 전문 플래너 챗봇 
 - 숙소·숙박시설·호텔·펜션·게스트하우스 질문 → recommend_stay_place
 - 여행 일정·코스·계획 질문 → generate_itinerary (위 수집 절차 선행 필수)
   · 일정 생성 파이프라인에서는 관광지, 맛집, 숙박시설, 날씨 정보를 자동으로 함께 조회합니다.
-- 고속도로 소통·혼잡 질문 → get_highway_traffic
-- 통행요금·고속도로 비용 질문 → get_highway_fare
+- 출발지/도착지 교통수단 비교·소요시간·요금 질문 → get_transit_routes
+
 - 렌트카·차량 대여 질문 → search_rentcar
 - 편의점·마트·병원·약국·주유소·은행 등 편의시설 질문 → search_facilities
 
@@ -118,7 +118,7 @@ def load_css(path: str):
 
 
 # ── 페이지 설정 ───────────────────────────────────
-st.set_page_config(page_title="TravelMate KR", page_icon="🗺️", layout="wide")
+st.set_page_config(page_title="여키어때", page_icon="✈️", layout="wide")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_css(os.path.join(BASE_DIR, "style.css"))
 
@@ -498,7 +498,7 @@ def run_itinerary_pipeline(itin_args: dict, raw_user_input: str = "") -> dict:
     if origin:
         status_ph.info("🚗 교통 정보 조회 중...")
         try:
-            transit_data = get_highway_traffic(origin, destination)
+            transit_data = get_transit_routes(origin, destination)
         except Exception as e:
             transit_data = {"error": str(e)}
 
