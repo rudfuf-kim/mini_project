@@ -14,7 +14,6 @@ from tool_restaurant import search_restaurants,                    TOOL_SCHEMA  
 from tool_attraction import search_attractions,                    TOOL_SCHEMA  as ATTRACTION_SCHEMA
 from tool_itinerary  import generate_itinerary,                    TOOL_SCHEMA  as ITINERARY_SCHEMA
 from tool_transit    import get_highway_traffic, get_highway_fare, TOOL_SCHEMAS as TRANSIT_SCHEMAS
-from tool_mbti       import recommend_by_mbti, VALID_MBTI
 import components as C
 
 load_dotenv()
@@ -159,32 +158,6 @@ if not st.session_state.messages:
         with cols2[i]:
             if st.button(ex, key=f"pill_{i}", use_container_width=True):
                 st.session_state["pending_input"] = ex
-
-    # ── [신규] MBTI별 여행지 추천 배너 ──────────────
-    st.markdown(C.mbti_banner(), unsafe_allow_html=True)
-
-    mbti_cols = st.columns([3, 1])
-    with mbti_cols[0]:
-        selected_mbti = st.selectbox(
-            "당신의 MBTI를 선택해 주세요",
-            options=["선택 안 함"] + VALID_MBTI,
-            key="mbti_select",
-        )
-    with mbti_cols[1]:
-        st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
-        mbti_clicked = st.button("추천받기", use_container_width=True, key="mbti_submit")
-
-    if mbti_clicked and selected_mbti != "선택 안 함":
-        with st.spinner(f"{selected_mbti} 성향에 맞는 여행지를 찾는 중..."):
-            mbti_result = recommend_by_mbti(selected_mbti)
-
-        if mbti_result.get("error"):
-            st.error(mbti_result["error"])
-        else:
-            st.markdown(f"### 🧭 {selected_mbti}에게 추천하는 국내 여행지")
-            st.markdown(mbti_result["추천"])
-    elif mbti_clicked:
-        st.warning("MBTI를 먼저 선택해 주세요.")
 
 else:
     for msg in st.session_state.messages:
